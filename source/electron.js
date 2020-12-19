@@ -584,35 +584,59 @@ host.ElectronHost.FileStream = class {
 
     peek(length) {
         length = length !== undefined ? length : this._length - this._position;
+        if (length < 0x10000000) {
+            const position = this._fill(length);
+            this._position -= length;
+            return this._buffer.subarray(position, position + length);
+        }
         const position = this._position;
         this.skip(length);
         this.seek(position);
-        const descriptor = fs.openSync(this._file, 'r');
         const buffer = new Uint8Array(length);
-        fs.readSync(descriptor, buffer, 0, length, position);
-        fs.closeSync(descriptor);
+        this._read(buffer, position);
         return buffer;
     }
 
     read(length) {
         length = length !== undefined ? length : this._length - this._position;
+        if (length < 0x10000000) {
+            const position = this._fill(length);
+            return this._buffer.subarray(position, position + length);
+        }
         const position = this._position;
         this.skip(length);
-        const descriptor = fs.openSync(this._file, 'r');
         const buffer = new Uint8Array(length);
-        fs.readSync(descriptor, buffer, 0, length, position);
-        fs.closeSync(descriptor);
+        this._read(buffer, position);
         return buffer;
     }
 
     byte() {
+        const position = this._fill(1);
+        return this.buffer[position];
+    }
+
+    _fill(length) {
+        if (this._position + length > this._length) {
+            throw new Error('Expected ' + (this._position + length - this._length) + ' more bytes. The file might be corrupted. Unexpected end of file.');
+        }
+        if (!this._buffer || this._position < this._offset || this._position + length > this._offset + this._buffer.length) {
+            this._offset = this._position;
+            this._read(this._buffer, this._offset);
+        }
         const position = this._position;
-        this.skip(1);
+        this._position += length;
+        return position - this._offset;
+    }
+
+    _read(buffer, offset) {
         const descriptor = fs.openSync(this._file, 'r');
-        const buffer = new Uint8Array(1);
-        fs.readSync(descriptor, buffer, 0, 1, position);
-        fs.closeSync(descriptor);
-        return buffer[0];
+        try {
+            this._buffer = new Uint8Array(Math.min(0x10000000, this._length - this._offset));
+            fs.readSync(descriptor, this._buffer, 0, this._buffer.length, this._offset);
+        }
+        finally {
+            fs.closeSync(descriptor);
+        }
     }
 };
 
